@@ -56,17 +56,19 @@ impl Entry {
         new.set_flags(PRESENT | WRITABLE);
         unsafe {
             atomic_cxchg(&mut self.0, old.0, new.0);
+            ::core::intrinsics::atomic_fence();
         }
     }
 }
 
 pub fn page_map(vaddr: usize, paddr: usize) -> Option<usize> {
     match get_entry(vaddr, false) {
-        Some(_) => None,
+        Some(_) => panic!("vaddr already in use. vaddr = {:x}", vaddr),
         None => {
+            //kprint!("maping {:x} to {:x}\n", vaddr, paddr);
             let entry: &mut Entry = get_entry(vaddr, true).unwrap();
-            entry.set_flags(PRESENT | WRITABLE);
             entry.set_paddr(paddr);
+            entry.set_flags(PRESENT | WRITABLE);
             unsafe {tlb::flush(vaddr)};
             Some(vaddr)
         }
@@ -88,18 +90,17 @@ pub fn get_entry<'a>(vaddr: usize, create: bool) -> Option<&'a mut Entry> {
     let mut table: &mut [Entry; 512] = unsafe {get_table(cr3() as usize)};
     for level in (0..4).rev() {
         {
-            if level == 0 {
-                let flags = table[get_index(vaddr, level)].flags();
-                table[get_index(vaddr, level)].set_flags(flags | PRESENT);
-                return Option::Some(&mut table[get_index(vaddr, level)]);
-            }
             let target = &mut table[get_index(vaddr, level)];
             //kprint!("{:x}\n", target.toInt());
             if target.flags().contains(PRESENT) == false {
                 if !create {
                     return Option::None;
                 } else {
-                    if level == 0 { return Option::None; }
+                    if level == 0 {
+                        let flags = target.flags();
+                        target.set_flags(flags | PRESENT);
+                        return unsafe { Option::Some(::core::intrinsics::transmute(target)) };
+                    }
                     target.try_set_paddr(create_table());
                 }
             }

@@ -13,11 +13,12 @@ rlibc = "1.0.0"
 multiboot2 = "0.3.1"
 bitflags = "0.7.0"
 bit_field = "0.7.0"
+itoa = "0.3.0"
 
 [dependencies.lazy_static]
 version = "0.2.2"
 features = ["spin_no_std"]
 
 [profile.dev]
-opt-level = 0
+opt-level = 3
 debug = true

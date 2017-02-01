@@ -78,8 +78,12 @@ align 8
     call rax
     mov rsp, rax
     sub rsp, 8
+    ;and rsp, -16
+
     mov rbp, rsp
+    mfence
     mov word [v_lock], 0
+    ;
     mov rax, mp_main
     jmp rax
 
@@ -122,5 +126,6 @@ acquire_lock:
     pause
     jmp acquire_lock
 .got_lock_1:
+    mfence
     mov eax, get_addr(mp_start_32.locked)
     jmp eax

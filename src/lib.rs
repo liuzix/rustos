@@ -12,6 +12,7 @@
 #![feature(asm)]
 #![feature(naked_functions)]
 #![feature(alloc)]
+#![feature(core_slice_ext)]
 #[macro_use]
 extern crate x86;
 extern crate spin;
@@ -55,17 +56,27 @@ pub extern "C" fn kmain(bootinfo: usize) {
     let heap_test = Box::new(42);
 
     descriptors::IDT.load();
+
     test_sse();
+    test_mapping();
 
     let id = devices::apic::get_apic_id();
     kprint!("cpu local id {}\n", id);
-    //unsafe {int!(3);}
+
+    /*unsafe {
+        int!(3);
+        let ptr = 0xfff000000 as *mut u64;
+        *ptr = 0x666666;
+        kprint!("{:x}\n", *ptr);
+    }*/
     //kprint!("we are back!\n");
-    for x in 0..10 {
-        kprint!("fuck {} \n", x);
-    }
     load_ap_bootstrap(0x1000);
     devices::apic::mp_init_broadcast(0x1000);
+
+    for _ in 0..60 {
+        unsafe { devices::apic::micro_delay(50 * 1000); }
+    }
+    //devices::apic::mp_abort_all();
     loop {
 
     }
@@ -73,26 +84,35 @@ pub extern "C" fn kmain(bootinfo: usize) {
 
 #[no_mangle]
 pub extern "C" fn mp_main() {
+    unsafe { ::x86::irq::enable() };
     let id = devices::apic::get_apic_id();
     kprint!("cpu local id {}\n", id);
     let mut v = vec![0];
-    for x in 0..300 {
+    for x in 0..10000 {
         v.push(x);
     }
+    //unsafe {
+    //    asm!("mov rsp, 0
+    //          int 8" :::: "intel");
+    //}
+    // unsafe {int!(4);}
 
-    for x in 0..100{
+    for x in 0..10000 {
         serial::write_string((v[x].to_string() + "\n").as_str());
+        //serial::write_char('!');
 
+        //kprint!("{}\n", v[x]);
     }
-
+    kprint!("done!\n");
     loop {}
 }
 
 #[no_mangle]
 pub extern "C" fn create_stack() -> usize {
+    unsafe { x86::tlb::flush_all(); }
     descriptors::IDT.load();
     let ret = mem::FRAME.alloc_stack(2);
-    kprint!("stack = 0x{:x}\n", ret);
+    //kprint!("stack = 0x{:x}\n", ret);
     ret
 
 }
@@ -124,6 +144,19 @@ fn test_sse() {
     kprint!("xmm registers working\n");
 }
 
+fn test_mapping() {
+    unsafe {
+        let a = mem::FRAME.alloc_multiple(2);
+        let b = mem::FRAME.alloc_multiple(2);
+        let k: *mut usize = transmute(a);
+        let l: *mut usize = transmute(b);
+        *k = 0x23333333;
+        *l = 0x12345677;
+        assert_eq!(*k, 0x23333333);
+        assert_eq!(*l, 0x12345677);
+    }
+}
+
 // These functions are used by the compiler, but not
 // for a bare-bones hello world. These are normally
 // provided by libstd.
@@ -145,7 +178,9 @@ pub extern "C" fn rust_begin_panic(_msg: core::fmt::Arguments,
     vga::VGAWRITER.lock().write_fmt(_msg);
     kprint!("\nat file {} line {}\n", _file, _line);
     serial::write_string("panic!");
-    devices::apic::mp_abort_all()
+    devices::apic::mp_abort_all();
+    loop {}
+    //
 }
 
 #[allow(non_snake_case)]

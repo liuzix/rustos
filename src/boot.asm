@@ -257,6 +257,7 @@ gdt_data: equ $ - gdt64 ; new
     dq (1<<44) | (1<<47) | (1<<41) ; data segment
 tss: equ $ - gdt64 ; new
     dq 0
+    dq 0
 gdt_pointer:
     dw $ - gdt64 - 1
     dq gdt64

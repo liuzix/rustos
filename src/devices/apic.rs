@@ -18,18 +18,16 @@ pub fn get_apic_id() -> u32 {
         // disable 8259 pic
         io::outb(0xa1, 0xff);
         io::outb(0x21, 0xff);
-
+        msr::wrmsr(msr::IA32_X2APIC_EOI, 0);
+        msr::wrmsr(msr::IA32_X2APIC_SIVR, 1 << 8 | 20);
         let local_apic_id: u64 = msr::rdmsr(msr::IA32_X2APIC_APICID);
         local_apic_id as u32
     }
 }
 
-pub fn mp_abort_all() -> ! {
+pub fn mp_abort_all() {
     unsafe {
-        msr::wrmsr(msr::IA32_X2APIC_ICR, 0xc4000 | 33);
-        loop {
-            asm!("hlt" :::: "volatile");
-        }
+        msr::wrmsr(msr::IA32_X2APIC_ICR, 0xc403c);
     }
 }
 
@@ -45,7 +43,7 @@ pub fn mp_init_broadcast(entry_point: u64) {
 }
 
 /***
-It will spin until the timer goes up
+It will spin until the timer goes off
 ***/
 pub unsafe fn micro_delay(microseconds: u64) {
     // Channel 2 stuff I don't understand

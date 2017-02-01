@@ -12,6 +12,7 @@ unsafe impl<'a> Sync for FrameAllocator<'a> {}
 
 pub struct FrameAllocator<'a> {
     available_base: usize,
+    upper: usize,
     freemap: UnsafeCell<bitmap::Bitmap<'a>>,
 }
 
@@ -21,6 +22,7 @@ impl<'a> FrameAllocator<'a> {
         FrameAllocator {
             freemap: UnsafeCell::new(bitmap::Bitmap::new(base, len_bytes / 4096)),
             available_base: ((base + (len_bytes / (4096 * 8))) / 4096) * 4096,
+            upper: base + len_bytes,
         }
     }
 
@@ -46,7 +48,9 @@ impl<'a> FrameAllocator<'a> {
     pub fn alloc(&self) -> usize {
         let fm: &mut bitmap::Bitmap = unsafe { &mut *self.freemap.get() };
         let pos = fm.set_first_unused();
-
+        if self.available_base >= self.upper {
+            panic!("OOM!");
+        }
         let ret = self.available_base + 4096 * pos;
         //kprint!("new frame = 0x{:x}\n", ret);
         return ret;
