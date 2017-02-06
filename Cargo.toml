@@ -7,18 +7,24 @@ authors = ["Zixiong Liu <lzx@uchicago.edu>"]
 crate-type = ["staticlib"]
 
 [dependencies]
-x86 = "0.7.2"
+
 spin = "0.4.5"
 rlibc = "1.0.0"
-multiboot2 = "0.3.1"
-bitflags = "0.7.0"
+multiboot2 = "0.3.2"
+rtm = "1.0.0"
 bit_field = "0.7.0"
-itoa = "0.3.0"
 
 [dependencies.lazy_static]
 version = "0.2.2"
 features = ["spin_no_std"]
 
+[dependencies.bitflags]
+version = "0.7.0"
+
+[dependencies.x86]
+version = "0.8.1"
+default-features = false
+
 [profile.dev]
-opt-level = 3
+opt-level = 0
 debug = true

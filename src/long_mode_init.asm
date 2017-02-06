@@ -23,3 +23,11 @@ long_mode_start:
     mov rax, 0x4f214f644f654f6e
     mov [0xb8010], rax
     hlt
+
+
+;fn (dst1: &T, dst2: &R, new1: T, new2: R, old1: T, old2: R) -> bool
+double_cas:
+    xbegin .failed
+
+
+.failed:

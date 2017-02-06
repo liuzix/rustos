@@ -1,4 +1,4 @@
-use x86::io;
+use x86::shared::{io, irq};
 use spin::Mutex;
 
 
@@ -29,9 +29,15 @@ pub fn write_char(a: char) {
 }
 
 pub fn write_string(s: &str) {
+    unsafe {
+        //irq::disable();
+    }
     let g = SERIAL_LOCK.lock();
     for c in s.chars() {
         write_char(c);
     }
     drop(g);
+    unsafe {
+        //irq::enable();
+    }
 }

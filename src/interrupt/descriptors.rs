@@ -1,11 +1,14 @@
-use x86::task::*;
-use x86::segmentation::*;
-use x86::dtables::*;
+use x86::bits64::task::*;
+use x86::shared::task::load_tr;
+use x86::shared::segmentation::*;
+use x86::shared::dtables::*;
+
 use core::intrinsics::transmute;
 use core::mem::size_of;
 use alloc::boxed;
 use core::sync::atomic::*;
 use collections::string::ToString;
+use x86::shared::PrivilegeLevel;
 
 
 #[macro_use]
@@ -27,6 +30,7 @@ lazy_static! {
         idt.set_handler(13, exception_handler_errorcode!(gp_handler)).set_stack_index(0);
         idt.set_handler(14, exception_handler_errorcode!(page_fault_handler)).set_stack_index(2);
         idt.set_handler(60, exception_handler!(abort_handler));
+        idt.set_handler(::devices::apic::TIMER_INTERRUPT_VEC, exception_handler!(timer_handler));
 
         idt
     };
@@ -66,6 +70,7 @@ extern "C" fn page_fault_handler(fr: &ExceptionStackFrame, ec: u64) {
 }
 
 extern "C" fn default_handler(fr: &ExceptionStackFrame) {
+    ::devices::apic::mp_abort_all();
     ::devices::serial::write_string("fuck?");
     //unsafe {
     //    loop {
@@ -73,6 +78,7 @@ extern "C" fn default_handler(fr: &ExceptionStackFrame) {
     //    }
     //}
     ::devices::vga::vga_force_unlock();
+
     //one_fence!();
     kprint!("I don't know what is wrong.\n");
     kprint!("{:#?}\n", fr);
@@ -93,6 +99,14 @@ extern "C" fn abort_handler(fr: &ExceptionStackFrame) {
     unsafe { asm!("cli; hlt;") };
 }
 
+extern "C" fn timer_handler(fr: &ExceptionStackFrame) {
+    ::devices::serial::write_char('!');
+    unsafe {
+        // ::x86::shared::msr::wrmsr(::x86::shared::msr::IA32_X2APIC_EOI, 0);
+    }
+    ::tasks::SCHEDULER.schedule();
+}
+
 
 pub type HandlerFunc = extern "C" fn() -> !;
 
@@ -109,10 +123,11 @@ impl Idt {
     pub fn load(&self) {
         unsafe {
             let ptr = DescriptorTablePointer {
-                base: transmute::<&Idt, u64>(self),
+                base: self,
                 limit: (size_of::<Idt>() - 1) as u16
             };
-            lidt(&ptr);
+            //lidt(&ptr);
+            asm!("lidt [$0]" :: "r"(&ptr) :: "intel");
             //;
             install_tss_table();
 
@@ -135,7 +150,7 @@ pub struct Entry {
 impl Entry {
     fn missing() -> Self {
         Entry {
-            gdt_selector: SegmentSelector::new(0) | RPL_0,
+            gdt_selector: SegmentSelector::new(0, PrivilegeLevel::Ring0) | RPL_0,
             pointer_low: 0,
             pointer_middle: 0,
             pointer_high: 0,
@@ -218,10 +233,10 @@ pub unsafe fn install_tss_table() {
         flags: 0b0000000010001001
     };
     use super::gdt;
-    let GDT_ref: &mut gdt::GDTController = gdt::GDT.0.get().as_mut().unwrap();
-    let tss_index = GDT_ref.add(transmute::<TSSDescriptor, u64>(descriptor));
-    GDT_ref.install();
-    load_ltr(SegmentSelector::new(tss_index as u16))
+    let gdt_ref: &mut gdt::GDTController = gdt::GDT.0.get().as_mut().unwrap();
+    let tss_index = gdt_ref.add(transmute::<TSSDescriptor, u64>(descriptor));
+    gdt_ref.install();
+    load_tr(SegmentSelector::new(tss_index as u16, PrivilegeLevel::Ring0))
 }
 
 pub fn get_tss_table<'a>() -> &'a TaskStateSegment {
@@ -230,8 +245,8 @@ pub fn get_tss_table<'a>() -> &'a TaskStateSegment {
     tss.ist[0] = ::mem::FRAME.alloc_stack(2) as u64;
     tss.ist[1] = ::mem::FRAME.alloc_stack(2) as u64;
     tss.ist[2] = ::mem::FRAME.alloc_stack(2) as u64;
-    kprint!("ist[0] = 0x{:x}\n", tss.ist[0]);
-    kprint!("ist[1] = 0x{:x}\n", tss.ist[1]);
-    kprint!("ist[2] = 0x{:x}\n", tss.ist[2]);
+    //kprint!("ist[0] = 0x{:x}\n", tss.ist[0]);
+    //kprint!("ist[1] = 0x{:x}\n", tss.ist[1]);
+    //kprint!("ist[2] = 0x{:x}\n", tss.ist[2]);
     tss
 }

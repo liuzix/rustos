@@ -49,7 +49,7 @@ $(kernel): cargo $(rust_os) $(assembly_object_files) $(linker_script)
 	@x86_64-unknown-linux-gnu-ld -n --gc-sections -T $(linker_script) -o $(kernel) $(assembly_object_files) $(rust_os)
 
 cargo:
-	@cargo build --target $(target)
+	@xargo build --target $(target)
 
 # compile assembly files
 build/%.o: src/%.asm

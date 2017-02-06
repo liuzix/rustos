@@ -16,6 +16,12 @@ pub extern fn __rust_deallocate(ptr: *mut u8, _old_size: usize, _align: usize) {
     HEAP.deallocate(ptr, _old_size)
 }
 
+/*
+#[no_mangle]
+pub extern fn malloc (size: usize) -> *mut u8 {
+    __rust_allocate(size, 8)
+}*/
+
 #[no_mangle]
 pub extern fn __rust_reallocate(ptr: *mut u8, _old_size: usize, size: usize,
                                 _align: usize) -> *mut u8 {

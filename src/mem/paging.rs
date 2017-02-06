@@ -1,5 +1,5 @@
-use x86::controlregs::*;
-use x86::tlb;
+use x86::shared::control_regs::*;
+use x86::shared::tlb;
 use core::slice;
 use core::mem::size_of;
 use core::intrinsics::atomic_cxchg;

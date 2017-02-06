@@ -1,7 +1,6 @@
 use core::mem::size_of_val;
 use core::mem::transmute_copy;
 use core::intrinsics::transmute;
-use core::slice::SliceExt;
 use core::cell::UnsafeCell;
 use core::marker::Sync;
 

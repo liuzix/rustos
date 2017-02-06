@@ -4,13 +4,21 @@ use core::fmt;
 use spin::Mutex;
 use core::mem;
 use core::intrinsics;
+use x86::shared::irq;
 
 pub static VGAWRITER: Mutex<VgaWriter> = Mutex::new(VgaWriter::new());
 
 pub fn print(args : fmt::Arguments) {
     use core::fmt::Write;
+    unsafe {
+        irq::disable();
+    }
     let mut writer = VGAWRITER.lock();
     writer.write_fmt(args);
+    drop(writer);
+    unsafe {
+        irq::enable();
+    }
 }
 
 pub fn vga_force_unlock() {

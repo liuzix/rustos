@@ -77,12 +77,13 @@ macro_rules! exception_handler {
                       mov rsi, rsp
                       sub rsp, 8
                       call $0
+                      add rsp, 8
                       "
                       :: "i"($name as extern "C" fn(&ExceptionStackFrame))
                       : "rdi" : "intel", "volatile");
 
                 restore_scratch_registers!();
-                asm!("add rsp, 16; iretq" :::: "intel", "volatile");
+                asm!("add rsp, 8; iretq" :::: "intel", "volatile");
                 unreachable!();
             }
         }

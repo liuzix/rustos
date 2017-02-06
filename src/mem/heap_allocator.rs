@@ -22,6 +22,12 @@ macro_rules! pointer_sanity {
     };
 }
 
+macro_rules! aligned_size {
+    ($t:ident) => {
+        ((size_of::<$t>() - 1) / 16 + 1) * 16
+    };
+}
+
 pub struct HeapAllocator {
     arenas: AtomicPtr<Arena>
 }
@@ -51,7 +57,10 @@ impl HeapAllocator {
         if let Some(first) = unsafe { self.arenas.load(Ordering::SeqCst).as_mut() } {
             for current in first.iter() {
                 match current.allocate(len) {
-                    Some(x) => return x,
+                    Some(x) => {
+                        //    kprint!("allocate 0x{:x} size = {}\n", x as usize, len);
+                        return x
+                    },
                     None => continue,
                 }
             }
@@ -75,30 +84,32 @@ impl HeapAllocator {
 
     pub fn deallocate(&self, ptr: *mut u8, len: usize) {
         //kprint!("free?\n");
-        if len > MAX_BLOCK_SIZE {
+        let block: &mut Block = unsafe {
+            transmute::<_, *mut Block>(ptr.offset(0 - aligned_size!(Block) as isize))
+                .as_mut().unwrap()
+        };
+        //kprint!("free 0x{:x} size = {}\n", ptr as usize, block.length);
+        if block.length > MAX_BLOCK_SIZE {
             // is the a huge block?
-            let page_head = unsafe { ptr.offset(0 - size_of::<Block>() as isize) };
+            let page_head: *const _ = block;
             FRAME.dealloc_multiple(page_head as usize);
             return;
         }
-        let block: &mut Block = unsafe {
-            transmute::<_, *mut Block>(ptr).offset(-1)
-                    .as_mut().unwrap()
-        };
+
         block.free();
     }
 
     pub fn allocate_huge(&self, len: usize) -> usize {
         kprint!("allocate_huge! len = {}\n", len);
         assert!(len > MAX_BLOCK_SIZE);
-        let page_cnt: usize = (len + size_of::<Block>() - 1) / 4096 + 1;
-        assert!(page_cnt * 4096 >= len + size_of::<Block>());
+        let page_cnt: usize = (len + aligned_size!(Block) - 1) / 4096 + 1;
+        assert!(page_cnt * 4096 >= len + aligned_size!(Block));
         let mut blk = Block::create(::mem::FRAME.alloc_multiple(page_cnt));
         blk.arena = ptr::null_mut();
         blk.free = false;
         blk.length = len;
         blk.next = ptr::null_mut();
-        unsafe { transmute::<&mut Block, usize>(blk) + size_of::<Block>() }
+        unsafe { transmute::<&mut Block, usize>(blk) + aligned_size!(Block) }
     }
 }
 
@@ -126,9 +137,9 @@ impl Arena {
         let new_arena = unsafe {transmute::<usize, &mut Arena>(addr)};
         new_arena.next = AtomicPtr::new(ptr::null_mut());
 
-        let new_block = Block::create(addr + size_of::<Arena>());
+        let new_block = Block::create(addr + aligned_size!(Arena));
         pointer_sanity!(new_block);
-        new_block.length = 4096 - size_of::<Arena>() - size_of::<Block>();
+        new_block.length = 4096 - aligned_size!(Arena) - aligned_size!(Block);
         new_block.free = true;
         new_block.next = ptr::null_mut();
         new_block.arena = new_arena;
@@ -138,7 +149,7 @@ impl Arena {
     }
 
     pub fn allocate(&self, len: usize) -> Option<usize> {
-        let mut len = ((len - 1) / 8) * 8 + 8;
+        let mut len = ((len - 1) / 16) * 16 + 16;
         //kprint!("{:x}\n", unsafe {transmute::<_, usize>(&self.blocks)});
         let mut guard: MutexGuard<*mut Block> = self.blocks.lock();
         //kprint!("gwa!\n");
@@ -159,7 +170,7 @@ impl Arena {
                     *guard = this_block.next;
                 }
                 //kprint!("gwa! 0x{:x}\n", (this_block as *mut Block) as usize);
-                return Some(unsafe { transmute::<_, usize>(this_block) } + size_of::<Block>());
+                return Some(unsafe { transmute::<_, usize>(this_block) } + aligned_size!(Block));
             }
             previous = Some(r);
             r = this_block.next;
@@ -187,16 +198,15 @@ impl Block {
 
 
     pub fn shrink_to_fit(&mut self, target: usize) {
-        if self.length < size_of::<Block>() + MIN_BLOCK_SIZE + target {
+        if self.length < aligned_size!(Block) + MIN_BLOCK_SIZE + target {
             return;
         } else {
-
-            let offset = size_of::<Block>() + target;
+            let offset = aligned_size!(Block) + target;
             let base_addr: usize = unsafe {transmute_copy::<&mut Block, _>(&self)};
             let new_block: &mut Block = Block::create(base_addr + offset);
             pointer_sanity!(new_block);
             new_block.next = self.next;
-            new_block.length = self.length - size_of::<Block>() - target;
+            new_block.length = self.length - aligned_size!(Block) - target;
             unsafe {
                 //assert!(transmute_copy::<_, usize>(&new_block) + new_block.length <=
                 //    transmute_copy::<_, usize>(&self.arena) + 4096);

@@ -1,5 +1,6 @@
 #![feature(allocator)]
 #![allocator]
+#![feature(alloc)]
 #![feature(lang_items)]
 #![feature(const_fn)]
 #![feature(unique)]
@@ -7,12 +8,18 @@
 #![feature(associated_consts)]
 #![no_std]
 #![allow(unused)]
+#![allow(mutable_transmutes)]
 #![feature(collections)]
 #![allow(private_no_mangle_fns)]
 #![feature(asm)]
 #![feature(naked_functions)]
-#![feature(alloc)]
-#![feature(core_slice_ext)]
+#![feature(box_syntax)]
+#![feature(repr_simd)]
+#![feature(i128_type)]
+#![feature(link_llvm_intrinsics)]
+#![feature(ptr_eq)]
+#[macro_use]
+extern crate alloc;
 #[macro_use]
 extern crate x86;
 extern crate spin;
@@ -20,7 +27,8 @@ extern crate rlibc;
 extern crate multiboot2;
 extern crate bit_field;
 
-extern crate alloc;
+extern crate rtm;
+// extern crate alloc;
 #[macro_use]
 extern crate collections;
 #[macro_use]
@@ -31,7 +39,10 @@ extern crate lazy_static;
 mod devices;
 mod mem;
 mod interrupt;
+mod tasks;
+mod containers;
 use interrupt::descriptors;
+use tasks::threads::KThread;
 use devices::serial;
 use devices::vga;
 use mem::paging;
@@ -40,6 +51,9 @@ use core::fmt::Write;
 use collections::vec;
 use core::intrinsics::transmute;
 use collections::string::ToString;
+use x86::shared::irq;
+use containers::queue::Queue;
+use containers::cpu_local::CPULocal;
 
 #[no_mangle]
 pub extern "C" fn kmain(bootinfo: usize) {
@@ -48,8 +62,8 @@ pub extern "C" fn kmain(bootinfo: usize) {
     serial::init();
     kprint!("multiboot_info = {:x}\n", bootinfo);
 
-    //mem::parse_multiboot(bootinfo);
-    unsafe{mem::BOOTINFO = bootinfo};
+    // mem::parse_multiboot(bootinfo);
+    unsafe { mem::BOOTINFO = bootinfo };
     mem::bitmap::test_bitmap();
 
     use alloc::boxed::Box;
@@ -60,64 +74,137 @@ pub extern "C" fn kmain(bootinfo: usize) {
     test_sse();
     test_mapping();
 
-    let id = devices::apic::get_apic_id();
+    let id = devices::apic::mp_apic_init();
     kprint!("cpu local id {}\n", id);
 
-    /*unsafe {
-        int!(3);
-        let ptr = 0xfff000000 as *mut u64;
-        *ptr = 0x666666;
-        kprint!("{:x}\n", *ptr);
-    }*/
-    //kprint!("we are back!\n");
+    unsafe {
+        //   int!(12);
+        // let ptr = 0xfff000000 as *mut u64;
+        // ptr = 0x666666;
+        // kprint!("{:x}\n", *ptr);
+    }
+    // kprint!("we are back!\n");
     load_ap_bootstrap(0x1000);
     devices::apic::mp_init_broadcast(0x1000);
 
-    for _ in 0..60 {
-        unsafe { devices::apic::micro_delay(50 * 1000); }
+    // unsafe { devices::apic::micro_delay(1 * 1000); }
+    for _ in 0..2 {
+        unsafe {
+            devices::apic::micro_delay(50 * 1000);
+        }
     }
-    //devices::apic::mp_abort_all();
-    loop {
+    ::devices::apic::enable_timer();
 
+    //
+    let myq = Queue::create();
+    myq.enqueue(1);
+    myq.enqueue(2);
+    kprint!("{:?}\n", myq.dequeue());
+    myq.enqueue(3);
+    kprint!("{:?}\n", myq.dequeue());
+    kprint!("{:?}\n", myq.dequeue());
+    ::tasks::threads::new_thread(thread_test, "Test1");
+
+
+    //::tasks::SCHEDULER.schedule();
+
+    // devices::apic::mp_abort_all();
+
+    //let mut bootstrap_thread = KThread::boot_strap_thread();
+
+    //let new_thread = KThread::create(thread_test, "testing thread");
+    //bootstrap_thread.switch_to(&new_thread);
+
+
+    //kprint!("done!\n");
+    loop {}
+}
+
+lazy_static! {
+    static ref clocal: CPULocal<usize> = CPULocal::create();
+}
+
+fn test_cpu_local() {
+    for x in 0..1000 {
+        clocal.set(x);
+        assert!(*clocal.get_mut().unwrap() == x);
     }
+}
+
+fn thread_test(val: usize) -> usize {
+    kprint!("we are in a new thread! 0x{:x}\n", val);
+    ::tasks::threads::new_thread(thread_test2, "Test2");
+    ::tasks::threads::new_thread(thread_test2, "Test3");
+    ::tasks::threads::new_thread(thread_test2, "Test4");
+    0x1
+}
+
+fn thread_test2(val: usize) -> usize {
+    kprint!("we are in a new thread! 0x{:x}\n", val);
+    let mut rsp: usize = 0;
+    for x in 1..10000 {
+        unsafe {
+            asm!("mov $0, rsp": "=r"(rsp) ::"memory": "intel");
+        }
+        kprint!("{}, {:x}\n", x, rsp);
+    }
+    0x2
+}
+
+lazy_static! {
+    static ref q: Queue<usize> = Queue::create();
 }
 
 #[no_mangle]
 pub extern "C" fn mp_main() {
-    unsafe { ::x86::irq::enable() };
-    let id = devices::apic::get_apic_id();
+    unsafe { irq::enable() };
+
+    let id = devices::apic::mp_apic_init();
     kprint!("cpu local id {}\n", id);
-    let mut v = vec![0];
-    for x in 0..10000 {
-        v.push(x);
+
+    for _ in 0..10000 {
+        unsafe {
+            asm!("pause" :::: "volatile");
+        }
     }
-    //unsafe {
+
+    ::devices::apic::enable_timer();
+    kprint!("done\n");
+    //
+
     //    asm!("mov rsp, 0
     //          int 8" :::: "intel");
-    //}
+    //
     // unsafe {int!(4);}
+    /*
+        for x in 0..10000 {
+            serial::write_string((v[x].to_string() + "\n").as_str());
+            // serial::write_char('!');
 
-    for x in 0..10000 {
-        serial::write_string((v[x].to_string() + "\n").as_str());
-        //serial::write_char('!');
+            // kprint!("{}\n", v[x]);
+        }
+    */
 
-        //kprint!("{}\n", v[x]);
+    loop {
+        unsafe {
+            asm!("sti; hlt;");
+        }
     }
-    kprint!("done!\n");
-    loop {}
 }
 
 #[no_mangle]
 pub extern "C" fn create_stack() -> usize {
-    unsafe { x86::tlb::flush_all(); }
+    unsafe {
+        x86::shared::tlb::flush_all();
+    }
     descriptors::IDT.load();
     let ret = mem::FRAME.alloc_stack(2);
-    //kprint!("stack = 0x{:x}\n", ret);
+    // kprint!("stack = 0x{:x}\n", ret);
     ret
 
 }
 
-extern {
+extern "C" {
     static mut mp_start: u8;
     static mut mp_end: u8;
 }
@@ -131,7 +218,7 @@ fn load_ap_bootstrap(addr: u64) {
 }
 
 fn test_sse() {
-    let mut numbers: [u64; 4] = [1,2,3,4];
+    let mut numbers: [u64; 4] = [1, 2, 3, 4];
     let ptr = numbers.as_mut_ptr();
     unsafe {
         asm!("mov r8, 128000
@@ -179,6 +266,10 @@ pub extern "C" fn rust_begin_panic(_msg: core::fmt::Arguments,
     kprint!("\nat file {} line {}\n", _file, _line);
     serial::write_string("panic!");
     devices::apic::mp_abort_all();
+    unsafe {
+        irq::disable();
+        asm!("cli; hlt;");
+    }
     loop {}
     //
 }
@@ -187,4 +278,15 @@ pub extern "C" fn rust_begin_panic(_msg: core::fmt::Arguments,
 #[no_mangle]
 pub extern "C" fn _Unwind_Resume() -> ! {
     loop {}
+}
+
+/// This is just stupid
+#[no_mangle]
+pub extern "C" fn malloc(size: usize) -> *mut u8 {
+    mem::alloc_stub::__rust_allocate(size, 16)
+}
+
+#[no_mangle]
+pub extern "C" fn posix_memalign(size: usize, align: usize) -> *mut u8 {
+    mem::alloc_stub::__rust_allocate(size, align)
 }
