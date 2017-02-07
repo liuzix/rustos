@@ -93,6 +93,7 @@ pub fn enable_timer() {
         msr::wrmsr(msr::IA32_X2APIC_LVT_TIMER, 1 << 17 | TIMER_INTERRUPT_VEC as u64);
         let calib_init: usize = 10000000;
         msr::wrmsr(msr::IA32_X2APIC_INIT_COUNT, calib_init as u64);
+
         micro_delay(5 * 1000); // delay 1 ms
         let cur_count: usize = msr::rdmsr(msr::IA32_X2APIC_CUR_COUNT) as usize;
         msr::wrmsr(msr::IA32_X2APIC_INIT_COUNT, ((calib_init - cur_count) / 5 * TIMER_INTERVAL) as u64);

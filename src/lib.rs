@@ -27,7 +27,6 @@ extern crate rlibc;
 extern crate multiboot2;
 extern crate bit_field;
 
-extern crate rtm;
 // extern crate alloc;
 #[macro_use]
 extern crate collections;
@@ -54,6 +53,7 @@ use collections::string::ToString;
 use x86::shared::irq;
 use containers::queue::Queue;
 use containers::cpu_local::CPULocal;
+use core::sync::atomic::*;
 
 #[no_mangle]
 pub extern "C" fn kmain(bootinfo: usize) {
@@ -93,7 +93,7 @@ pub extern "C" fn kmain(bootinfo: usize) {
             devices::apic::micro_delay(50 * 1000);
         }
     }
-    ::devices::apic::enable_timer();
+
 
     //
     let myq = Queue::create();
@@ -103,8 +103,10 @@ pub extern "C" fn kmain(bootinfo: usize) {
     myq.enqueue(3);
     kprint!("{:?}\n", myq.dequeue());
     kprint!("{:?}\n", myq.dequeue());
+    kprint!("{:?}\n", myq.dequeue());
+    kprint!("{:?}\n", myq.dequeue());
     ::tasks::threads::new_thread(thread_test, "Test1");
-
+    ::devices::apic::enable_timer();
 
     //::tasks::SCHEDULER.schedule();
 
@@ -125,7 +127,7 @@ lazy_static! {
 }
 
 fn test_cpu_local() {
-    for x in 0..1000 {
+    for x in 0..1 {
         clocal.set(x);
         assert!(*clocal.get_mut().unwrap() == x);
     }
@@ -134,21 +136,32 @@ fn test_cpu_local() {
 fn thread_test(val: usize) -> usize {
     kprint!("we are in a new thread! 0x{:x}\n", val);
     ::tasks::threads::new_thread(thread_test2, "Test2");
-    ::tasks::threads::new_thread(thread_test2, "Test3");
-    ::tasks::threads::new_thread(thread_test2, "Test4");
+    ::tasks::threads::new_thread(thread_test2, "Test2");
+    ::tasks::threads::new_thread(thread_test2, "Test2");
+    ::tasks::threads::new_thread(thread_test2, "Test2");
+    ::tasks::threads::new_thread(thread_test2, "Test2");
+    ::tasks::threads::new_thread(thread_test2, "Test2");
+    ::tasks::threads::new_thread(thread_test2, "Test2");
+    ::tasks::threads::new_thread(thread_test2, "Test2");
+    ::tasks::threads::new_thread(thread_test2, "Test2");
+
+
+
     0x1
 }
 
+static i: AtomicUsize = ATOMIC_USIZE_INIT;
+
 fn thread_test2(val: usize) -> usize {
     kprint!("we are in a new thread! 0x{:x}\n", val);
-    let mut rsp: usize = 0;
-    for x in 1..10000 {
-        unsafe {
-            asm!("mov $0, rsp": "=r"(rsp) ::"memory": "intel");
-        }
-        kprint!("{}, {:x}\n", x, rsp);
+    //let mut vec = vec![1,2,3,];
+    for _ in 0..3000 {
+        let k = i.fetch_add(1, Ordering::SeqCst);
+        //    vec.push(k);
+        kprint!("{}\n",k);
     }
-    0x2
+    kprint!("done!\n");
+    i.load(Ordering::SeqCst)
 }
 
 lazy_static! {
@@ -160,16 +173,16 @@ pub extern "C" fn mp_main() {
     unsafe { irq::enable() };
 
     let id = devices::apic::mp_apic_init();
-    kprint!("cpu local id {}\n", id);
+    //kprint!("cpu local id {}\n", id);
 
-    for _ in 0..10000 {
+    for _ in 0..3000 {
         unsafe {
             asm!("pause" :::: "volatile");
         }
     }
 
     ::devices::apic::enable_timer();
-    kprint!("done\n");
+    //kprint!("done\n");
     //
 
     //    asm!("mov rsp, 0

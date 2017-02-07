@@ -38,16 +38,19 @@ impl<T> Queue<T> {
     pub fn enqueue(&self, val: T) {
         let new_node = box Node {
             data: Some(val),
-            ref_cnt: AtomicUsize::new(0),
+            ref_cnt: AtomicUsize::new(1),
             next: AtomicPtr::new(ptr::null_mut()),
             retired: AtomicBool::new(false)
         };
 
+
         let ptr_new_node = Box::into_raw(new_node);
 
         loop {
-            let tail = safe_read(&self.tail).unwrap(); // we need to guarantee tail is not empty
-            let new_grown_tail = tail.next.compare_and_swap(ptr::null_mut(), ptr_new_node, Ordering::SeqCst);
+            let tail = self.tail.load(Ordering::SeqCst); // we need to guarantee tail is not empty
+            let new_grown_tail = unsafe {
+                tail.as_mut().unwrap().next.compare_and_swap(ptr::null_mut(), ptr_new_node, Ordering::SeqCst)
+            };
             if new_grown_tail == ptr::null_mut() {
                 self.tail.compare_and_swap(tail, ptr_new_node, Ordering::SeqCst);
                 release(tail);
@@ -63,7 +66,8 @@ impl<T> Queue<T> {
     pub fn dequeue(&self) -> Option<T> {
         loop {
             let head = safe_read(&self.head).unwrap();
-            match safe_read(&head.next) {
+            let next_res = safe_read(&head.next);
+            match next_res {
                 Some(next) => {
                     let raw_head = unsafe { transmute_copy(&head) };
                     if self.head.compare_and_swap(raw_head, next, Ordering::SeqCst) != raw_head {
@@ -71,8 +75,10 @@ impl<T> Queue<T> {
                         continue;
                     }
                     let ret = (&mut next.data).take();
-                    next.retired.store(true, Ordering::SeqCst);
-                    release(next);
+                    head.retired.store(true, Ordering::SeqCst);
+                    unsafe {
+                        release(raw_head.as_mut().unwrap());
+                    }
                     return ret;
                 },
                 None => { return None; }
@@ -83,7 +89,7 @@ impl<T> Queue<T> {
 
 
 fn safe_read<T>(atomic_ptr: &AtomicPtr<Node<T>>) -> Option<&mut Node<T>> {
-    unsafe { asm!("1: xbegin 1b" ::: "rax": "intel", "volatile"); }
+    unsafe { asm!("1: xbegin 1b" ::: "rax", "memory": "intel", "volatile"); }
     let raw_ptr: *mut Node<T> = atomic_ptr.load(Ordering::Relaxed);
     unsafe {
         match raw_ptr.as_mut() {
@@ -110,7 +116,7 @@ fn release<T>(ptr: *mut Node<T>) {
         match ptr.as_mut() {
             Some(r) => {
                 let cur_count = r.ref_cnt.fetch_sub(1, Ordering::Release);
-                if r.retired.load(Ordering::Relaxed) == true && cur_count == 0 {
+                if r.retired.load(Ordering::SeqCst) == true && cur_count == 0 {
                     drop(Box::from_raw(r));
                 }
             },

@@ -151,6 +151,10 @@ impl Arena {
     pub fn allocate(&self, len: usize) -> Option<usize> {
         let mut len = ((len - 1) / 16) * 16 + 16;
         //kprint!("{:x}\n", unsafe {transmute::<_, usize>(&self.blocks)});
+        //let try_lock = self.blocks.try_lock();
+        //if try_lock.is_none() {
+        //    return None;
+        //}
         let mut guard: MutexGuard<*mut Block> = self.blocks.lock();
         //kprint!("gwa!\n");
         let mut r: *mut Block = *guard;
@@ -207,11 +211,7 @@ impl Block {
             pointer_sanity!(new_block);
             new_block.next = self.next;
             new_block.length = self.length - aligned_size!(Block) - target;
-            unsafe {
-                //assert!(transmute_copy::<_, usize>(&new_block) + new_block.length <=
-                //    transmute_copy::<_, usize>(&self.arena) + 4096);
-                // kprint!("self = {:x}, tar len = {}, new len = {}\n", transmute_copy::<_, usize>(&self), target, new_block.length);
-            }
+
             assert!(new_block.length < 4096);
             new_block.free = true;
             new_block.arena = self.arena;
@@ -261,6 +261,7 @@ impl Block {
                     }
                 }
                 self.free = true;
+                //self.try_merge();
                 return;
             }
 
@@ -283,8 +284,29 @@ impl Block {
             }
         }
         self.free = true;
+    }
 
-        //panic!("Cannot find place to insert 0x{:x}\n", unsafe {transmute::<_, usize>(self)});
+    ///
+    /// try merge this block with the next
+    /// if they are adjacent in memory
+    ///
+    fn try_merge(&mut self) {
+        if self.next.is_null() {
+            return;
+        }
+
+        if self.next as usize != self as *const Self as usize + self.length + aligned_size!(Block) {
+            return;
+        }
+
+        //kprint!("malloc: merging!\n");
+
+        let next_ref: &Block = unsafe { self.next.as_ref().unwrap() };
+        assert!(next_ref.magic == BLOCK_MAGIC);
+        assert!(next_ref.free == true);
+
+        self.next = next_ref.next;
+        self.length += aligned_size!(Block) + next_ref.length;
     }
 
     // pointer less-than

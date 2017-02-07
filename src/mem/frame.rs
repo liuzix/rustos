@@ -21,7 +21,7 @@ impl<'a> FrameAllocator<'a> {
         FREE_ADDRESS.store(KER_LOWER_BOUND as usize, Ordering::SeqCst);
         FrameAllocator {
             freemap: UnsafeCell::new(bitmap::Bitmap::new(base, len_bytes / 4096)),
-            available_base: ((base + (len_bytes / (4096 * 8))) / 4096) * 4096,
+            available_base: ((base + (len_bytes / (4096 * 8))) / 4096 + 1) * 4096,
             upper: base + len_bytes,
         }
     }

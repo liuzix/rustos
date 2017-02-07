@@ -11,7 +11,6 @@ crate-type = ["staticlib"]
 spin = "0.4.5"
 rlibc = "1.0.0"
 multiboot2 = "0.3.2"
-rtm = "1.0.0"
 bit_field = "0.7.0"
 
 [dependencies.lazy_static]
@@ -26,5 +25,5 @@ version = "0.8.1"
 default-features = false
 
 [profile.dev]
-opt-level = 0
+opt-level = 3
 debug = true

@@ -1,5 +1,6 @@
 use x86::shared::{io, irq};
 use spin::Mutex;
+use interrupt::guard::InterruptGuard;
 
 
 static SERIAL_LOCK: Mutex<()> = Mutex::new(());
@@ -29,15 +30,10 @@ pub fn write_char(a: char) {
 }
 
 pub fn write_string(s: &str) {
-    unsafe {
-        //irq::disable();
-    }
+    let guard = InterruptGuard::disable_interrupt();
     let g = SERIAL_LOCK.lock();
     for c in s.chars() {
         write_char(c);
     }
     drop(g);
-    unsafe {
-        //irq::enable();
-    }
 }

@@ -2,53 +2,60 @@ use alloc::arc::Arc;
 use mem;
 use collections::string::*;
 use core::sync::atomic::*;
+use core::intrinsics::*;
 use core::ops::Drop;
 use core::marker::Copy;
+use core::cell::RefCell;
 
 type DoThreadFunc = fn(usize) -> usize;
+pub type WrappedThread = Arc<RefCell<KThread>>;
 
 
 pub struct KThread {
     pub name: String,
     entry_point: DoThreadFunc,
     runnable: AtomicBool,
-    running: AtomicBool,
+    pub running: AtomicBool,
     rsp: usize,
     dead: AtomicBool,
     //rip: usize,
 }
 
 
-pub fn new_thread(entry_point: DoThreadFunc, name: &str) -> Arc<KThread> {
+pub fn new_thread(entry_point: DoThreadFunc, name: &str) -> WrappedThread {
     let ret = KThread::create(entry_point, name);
     super::SCHEDULER.insert_thread(ret.clone());
     ret
 }
 
 impl KThread {
-    pub fn create(entry_point: DoThreadFunc, name: &str) -> Arc<KThread> {
-        let mut ret = Arc::new(KThread {
+    pub fn create(entry_point: DoThreadFunc, name: &str) -> WrappedThread {
+        let mut ret = Arc::new(RefCell::new(KThread {
             name: name.to_string(),
             entry_point: entry_point,
             runnable: ATOMIC_BOOL_INIT,
             running: ATOMIC_BOOL_INIT,
             rsp: mem::FRAME.alloc_stack(3) - 8,
             dead: ATOMIC_BOOL_INIT
-        });
-        //ret.rsp -= 8;
-        unsafe {
-            asm!("mov rbx, rsp
+        }));
+
+        {
+            let ref_thrd = ret.borrow_mut();
+            let obj_addr = ret.as_ptr();
+            unsafe {
+                asm!("mov rbx, rsp
                    mov rsp, $0
                    push $1
                    push $2
                    push $3
                    mov $0, rsp
                    mov rsp, rbx"
-                   : "+*m"(&ret.rsp): "r"(ret.as_ref()),
+                   : "+*m"(&ref_thrd.rsp) : "r"(obj_addr),
                       "r"(exit_stub as extern fn()),
-                      "r"(ret.entry_point): "rbx": "intel", "volatile");
+                      "r"(ref_thrd.entry_point): "rbx": "intel", "volatile");
+            }
+            //kprint!("create 0x{:x}\n", ret.as_ref() as *const _ as usize);
         }
-        //kprint!("create 0x{:x}\n", ret.as_ref() as *const _ as usize);
         ret
     }
 
@@ -63,19 +70,8 @@ impl KThread {
         }
     }
 
-
-    pub fn suspend(&mut self) {
-        if self.runnable.swap(false, Ordering::SeqCst) == false {
-            // If already suspended
-            return;
-        }
-    }
-
-    pub fn stop(&self) {
-        self.running.store(false, Ordering::SeqCst);
-    }
-
-    pub fn switch_to(&self, other: &Self) {
+    #[cold]
+    pub fn switch_to(&mut self, other: &mut Self) {
         unsafe {
             /*
             Calculate RIP for resuming.
@@ -84,19 +80,32 @@ impl KThread {
             Pop new RIP off of stack.
             */
             //kprint!("{:x}\n", other.rsp);
-            other.running.store(true, Ordering::SeqCst);
+            //other.running.store(true, Ordering::SeqCst);
+            while other.running.swap(true, Ordering::SeqCst) == true {}
+            atomic_fence();
+            unsafe { ::x86::shared::msr::wrmsr(::x86::shared::msr::IA32_X2APIC_EOI, 0); }
+            unsafe {
+                //::x86::shared::msr::wrmsr(::x86::shared::msr::IA32_X2APIC_INIT_COUNT, ::x86::shared::msr::rdmsr(::x86::shared::msr::IA32_X2APIC_INIT_COUNT));
+            }
+            //unsafe { ::x86::shared::irq::enable(); }
             asm!("lea rax, [rip + back]
                   push rax
                   mov $0, rsp
-                  mov rbx, $1
-                  mov rsp, $2
+                  lea rbx, $1
+                  mov rax, 0
+                  xchg rax, $2
+                  mov rsp, rax
                   pop rax
+                  mfence
                   mov byte ptr [ebx], 0
+                  sti
                   jmp rax
                   back:" : "=*m" (&self.rsp),
-                           "=*m" (&self.running)
-                         : "m" (other.rsp)
-                         :: "intel", "volatile");
+                         "=*m" (&self.running),
+                          "=*m" (&other.rsp)
+                         :: "memory", "rbx", "rax", "rsp": "intel", "volatile");
+            //::core::intrinsics::transmute::<&Self, &mut Self>(self).rsp = 0;
+
             //::x86::shared::irq::enable();
         }
     }
@@ -107,6 +116,7 @@ impl KThread {
         self.dead.store(true, Ordering::SeqCst);
         unsafe {
             //::x86::shared::irq::disable();
+            asm!("cli;");
         }
         super::SCHEDULER.schedule();
         unreachable!();
@@ -115,6 +125,11 @@ impl KThread {
     pub fn is_dead(&self) -> bool {
         self.dead.load(Ordering::SeqCst)
     }
+    /*
+        pub fn get_mut<'a>(wrapped: &WrappedThread) -> &'a mut KThread {
+            &mut *wrapped.borrow_mut()
+        }
+    */
 }
 
 
@@ -125,6 +140,7 @@ impl Drop for KThread {
 }
 
 #[naked]
+#[inline(never)]
 extern "C" fn exit_stub() {
     unsafe {
         asm!("pop rdi
@@ -141,6 +157,8 @@ extern "C" fn exit_stub() {
 /// This function is needed because we cannot use local variables in
 /// a naked function
 ///
+///
+#[inline(never)]
 extern "C" fn exit_landing_pad(this: *mut KThread, ret: usize) {
     kprint!("diu!\n");
     unsafe {
