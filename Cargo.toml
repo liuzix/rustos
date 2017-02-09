@@ -25,5 +25,5 @@ version = "0.8.1"
 default-features = false
 
 [profile.dev]
-opt-level = 3
+opt-level = 0
 debug = true

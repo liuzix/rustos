@@ -151,11 +151,11 @@ impl Arena {
     pub fn allocate(&self, len: usize) -> Option<usize> {
         let mut len = ((len - 1) / 16) * 16 + 16;
         //kprint!("{:x}\n", unsafe {transmute::<_, usize>(&self.blocks)});
-        //let try_lock = self.blocks.try_lock();
-        //if try_lock.is_none() {
-        //    return None;
-        //}
-        let mut guard: MutexGuard<*mut Block> = self.blocks.lock();
+        let try_lock = self.blocks.try_lock();
+        if try_lock.is_none() {
+            return None;
+        }
+        let mut guard: MutexGuard<*mut Block> = try_lock.unwrap();
         //kprint!("gwa!\n");
         let mut r: *mut Block = *guard;
         let mut previous: Option<*mut Block> = None;
@@ -261,7 +261,7 @@ impl Block {
                     }
                 }
                 self.free = true;
-                //self.try_merge();
+                self.try_merge();
                 return;
             }
 

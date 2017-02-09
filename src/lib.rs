@@ -17,6 +17,8 @@
 #![feature(repr_simd)]
 #![feature(i128_type)]
 #![feature(link_llvm_intrinsics)]
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
 #![feature(ptr_eq)]
 #[macro_use]
 extern crate alloc;
@@ -40,6 +42,7 @@ mod mem;
 mod interrupt;
 mod tasks;
 mod containers;
+mod fs;
 use interrupt::descriptors;
 use tasks::threads::KThread;
 use devices::serial;
@@ -54,6 +57,7 @@ use x86::shared::irq;
 use containers::queue::Queue;
 use containers::cpu_local::CPULocal;
 use core::sync::atomic::*;
+
 
 #[no_mangle]
 pub extern "C" fn kmain(bootinfo: usize) {
@@ -94,31 +98,13 @@ pub extern "C" fn kmain(bootinfo: usize) {
         }
     }
 
-
-    //
-    let myq = Queue::create();
-    myq.enqueue(1);
-    myq.enqueue(2);
-    kprint!("{:?}\n", myq.dequeue());
-    myq.enqueue(3);
-    kprint!("{:?}\n", myq.dequeue());
-    kprint!("{:?}\n", myq.dequeue());
-    kprint!("{:?}\n", myq.dequeue());
-    kprint!("{:?}\n", myq.dequeue());
-    ::tasks::threads::new_thread(thread_test, "Test1");
+    kprint!("found {} PCI devices \n", devices::pci::PCI_DEVICES.len());
+    // call this to initialize global AHCI
+    //devices::ahci::global_HBA_status();
+    kprint!("found {} block devices\n", fs::block::BLOCK_DEVICES.len());
+    tasks::threads::new_thread(thread_test, "init");
     ::devices::apic::enable_timer();
 
-    //::tasks::SCHEDULER.schedule();
-
-    // devices::apic::mp_abort_all();
-
-    //let mut bootstrap_thread = KThread::boot_strap_thread();
-
-    //let new_thread = KThread::create(thread_test, "testing thread");
-    //bootstrap_thread.switch_to(&new_thread);
-
-
-    //kprint!("done!\n");
     loop {}
 }
 
@@ -141,9 +127,7 @@ fn thread_test(val: usize) -> usize {
     ::tasks::threads::new_thread(thread_test2, "Test2");
     ::tasks::threads::new_thread(thread_test2, "Test2");
     ::tasks::threads::new_thread(thread_test2, "Test2");
-    ::tasks::threads::new_thread(thread_test2, "Test2");
-    ::tasks::threads::new_thread(thread_test2, "Test2");
-    ::tasks::threads::new_thread(thread_test2, "Test2");
+
 
 
 
@@ -154,14 +138,19 @@ static i: AtomicUsize = ATOMIC_USIZE_INIT;
 
 fn thread_test2(val: usize) -> usize {
     kprint!("we are in a new thread! 0x{:x}\n", val);
-    //let mut vec = vec![1,2,3,];
-    for _ in 0..3000 {
-        let k = i.fetch_add(1, Ordering::SeqCst);
-        //    vec.push(k);
-        kprint!("{}\n",k);
+    test_parallel_block();
+    /*
+    let mut vec = collections::Vec::new();
+    for x in 0..10000 {
+        vec.push(x);
+    }
+
+    for x in 0..10000 {
+        vec.pop();
     }
     kprint!("done!\n");
-    i.load(Ordering::SeqCst)
+    */
+    0x2
 }
 
 lazy_static! {
@@ -182,21 +171,6 @@ pub extern "C" fn mp_main() {
     }
 
     ::devices::apic::enable_timer();
-    //kprint!("done\n");
-    //
-
-    //    asm!("mov rsp, 0
-    //          int 8" :::: "intel");
-    //
-    // unsafe {int!(4);}
-    /*
-        for x in 0..10000 {
-            serial::write_string((v[x].to_string() + "\n").as_str());
-            // serial::write_char('!');
-
-            // kprint!("{}\n", v[x]);
-        }
-    */
 
     loop {
         unsafe {
@@ -254,6 +228,23 @@ fn test_mapping() {
         *l = 0x12345677;
         assert_eq!(*k, 0x23333333);
         assert_eq!(*l, 0x12345677);
+    }
+}
+
+fn test_parallel_block() {
+    let block = &fs::block::BLOCK_DEVICES[0];
+    let test: &mut usize = unsafe { (mem::FRAME.alloc() as *mut usize).as_mut().unwrap() };
+    for x in 0..10000 {
+        unsafe {
+            *test = x;
+            block.write_block_raw(core::mem::transmute_copy(&test), x);
+
+            *test = 0x0;
+            block.read_block_raw(core::mem::transmute_copy(&test), x);
+            //kprint!("{}\n",x);
+        }
+
+        assert_eq!(*test, x);
     }
 }
 

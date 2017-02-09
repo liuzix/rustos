@@ -90,7 +90,7 @@ impl<T> Queue<T> {
 
 fn safe_read<T>(atomic_ptr: &AtomicPtr<Node<T>>) -> Option<&mut Node<T>> {
     unsafe { asm!("1: xbegin 1b" ::: "rax", "memory": "intel", "volatile"); }
-    let raw_ptr: *mut Node<T> = atomic_ptr.load(Ordering::Relaxed);
+    let raw_ptr: *mut Node<T> = atomic_ptr.load(Ordering::SeqCst);
     unsafe {
         match raw_ptr.as_mut() {
             Some(r) => {

@@ -84,10 +84,7 @@ impl KThread {
             while other.running.swap(true, Ordering::SeqCst) == true {}
             atomic_fence();
             unsafe { ::x86::shared::msr::wrmsr(::x86::shared::msr::IA32_X2APIC_EOI, 0); }
-            unsafe {
-                //::x86::shared::msr::wrmsr(::x86::shared::msr::IA32_X2APIC_INIT_COUNT, ::x86::shared::msr::rdmsr(::x86::shared::msr::IA32_X2APIC_INIT_COUNT));
-            }
-            //unsafe { ::x86::shared::irq::enable(); }
+
             asm!("lea rax, [rip + back]
                   push rax
                   mov $0, rsp

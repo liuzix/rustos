@@ -2,6 +2,7 @@ use super::bitmap;
 use core::cell::UnsafeCell;
 use core::sync::atomic::*;
 use super::paging::*;
+use x86::shared::tlb;
 
 
 const KER_LOWER_BOUND: u64 = 0xc0000000;
@@ -25,6 +26,7 @@ impl<'a> FrameAllocator<'a> {
             upper: base + len_bytes,
         }
     }
+
 
     pub fn alloc_multiple(&self, cnt: usize) -> usize {
         let cur = FREE_ADDRESS.fetch_add(cnt * 4096, Ordering::SeqCst);

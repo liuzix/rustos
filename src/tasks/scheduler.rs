@@ -73,7 +73,6 @@ impl Scheduler {
         if self.idle_thread.get_mut().is_none() {
             self.idle_thread.set(KThread::create(Scheduler::idle, "idle"));
         }
-        //kprint!("cpu {} idling\n", ::devices::apic::get_cpu_id());
         self.is_idling.set(true);
         self.idle_thread.get_mut().unwrap().clone()
     }

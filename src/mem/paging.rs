@@ -65,7 +65,6 @@ pub fn page_map(vaddr: usize, paddr: usize) -> Option<usize> {
     match get_entry(vaddr, false) {
         Some(_) => panic!("vaddr already in use. vaddr = {:x}", vaddr),
         None => {
-            //kprint!("maping {:x} to {:x}\n", vaddr, paddr);
             let entry: &mut Entry = get_entry(vaddr, true).unwrap();
             entry.set_paddr(paddr);
             entry.set_flags(PRESENT | WRITABLE);
@@ -140,4 +139,14 @@ unsafe fn get_table<'a>(vaddr: usize) -> &'a mut [Entry; 512] {
 fn create_table() -> usize {
     //kprint!("gwa!");
     FRAME.alloc()
+}
+
+pub fn map_volatile(addr: usize) -> usize {
+    let entry = get_entry(addr, true).unwrap();
+    entry.set_paddr(addr);
+    entry.set_flags(PRESENT | WRITABLE | NO_CACHE | WRITE_THROUGH);
+    unsafe {
+        tlb::flush(addr);
+    }
+    addr
 }
